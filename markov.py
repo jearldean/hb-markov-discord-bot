@@ -2,65 +2,132 @@
 
 import sys
 from random import choice
+import os
+import discord
+
+def open_and_read_file(file_path):
+    """Take file path as string; return text as string.
+
+    Takes a string that is a file path, opens the file, and turns
+    the file's contents as one string of text.
+    """
+
+    text = open(file_path).read()
+
+    return text
+    
 
 
-def open_and_read_file(filenames):
-    """Take list of files. Open them, read them, and return one long string."""
+def make_chains(text_string, chains=None):
+    """Take input text as string; return dictionary of Markov chains.
 
-    body = ''
-    for filename in filenames:
-        text_file = open(filename)
-        body = body + text_file.read()
-        text_file.close()
+    A chain will be a key that consists of a tuple of (word1, word2)
+    and the value would be a list of the word(s) that follow those two
+    words in the input text.
 
-    return body
+    For example:
 
+        >>> chains = make_chains('hi there mary hi there juanita')
 
-def make_chains(text_string):
-    """Take input text as string; return dictionary of Markov chains."""
+    Each bigram (except the last) will be a key in chains:
 
-    chains = {}
+        >>> sorted(chains.keys())
+        [('hi', 'there'), ('mary', 'hi'), ('there', 'mary')]
 
-    words = text_string.split()
-    for i in range(len(words) - 2):
-        key = (words[i], words[i + 1])
-        value = words[i + 2]
+    Each item in chains is a list of all possible following words:
 
-        if key not in chains:
-            chains[key] = []
+        >>> chains[('hi', 'there')]
+        ['mary', 'juanita']
 
-        chains[key].append(value)
+        >>> chains[('there','juanita')]
+        [None]
+    """
 
+    if not chains:
+        chains = {}
+
+    words = text_string.split(" ")
+
+    for i in range(len(words)-2):
+        key_tuple = (words[i], words[i+1])
+        next_word = words[i+2]
+        # https://stackoverflow.com/questions/12905999/python-dict-how-to-create-key-or-append-an-element-to-key
+        chains.setdefault(key_tuple,[next_word]).append(next_word)
     return chains
 
 
-def make_text(chains):
-    """Take dictionary of Markov chains; return random text."""
+def make_text(chains, seed_word):
+    """Return text from chains."""
 
-    keys = list(chains.keys())
-    key = choice(keys)
+    possible_seed_tuples = []
+    for each_key in chains:
+        if each_key[0] == seed_word:
+            possible_seed_tuples.append(each_key)
+    try:
+        seed_tuple = choice(possible_seed_tuples)
+    except IndexError:
+        return f"Uh oh; '{seed_word}' is not a good seed_word for this text."
+    words = [f"{seed_tuple[0]} {seed_tuple[1]}"]
 
-    words = [key[0], key[1]]
-    while key in chains:
-        # Keep looping until we have a key that isn't in the chains
-        # (which would mean it was the end of our original text).
+    while True:
+        
+        possible_values = chains.get(seed_tuple)
 
-        # Note that for long texts (like a full book), this might mean
-        # it would run for a very long time.
-
-        word = choice(chains[key])
-        words.append(word)
-        key = (key[1], word)
+        try:
+            seed_tuple = (seed_tuple[1], choice(possible_values))
+            words.append(seed_tuple[1])
+        except TypeError:
+            break
 
     return ' '.join(words)
 
+def text_blender(input_path_or_paths):
+    """ Blend a single file, or a list of files.
 
-# Get the filenames from the user through a command line prompt, ex:
-# python markov.py green-eggs.txt shakespeare.txt
-filenames = sys.argv[1:]
+    'gettysburg.txt', 'green-eggs.txt', 'the_boy_who_lived.txt'"""
 
-# Open the files and turn them into one long string
-text = open_and_read_file(filenames)
+    input_paths = input_path_or_paths
+    if isinstance(input_path_or_paths, str):
+        input_paths = [input_path_or_paths]
 
-# Get a Markov chain
-chains = make_chains(text)
+    seed_words = []
+    chains = {}
+    for input_path in input_paths:
+        # Open the file and turn it into one long string
+        try:
+            input_text = open_and_read_file(input_path)
+        except FileNotFoundError:
+            print(f"Uh oh; '{input_path}' is not a good input_path.\n")
+            continue
+
+        # Just make the seed word the first word of the text. Makes text natural-sounding.
+        seed_words.append(input_text.split(" ")[0])
+
+        # Get a Markov chain
+        chains = make_chains(input_text, chains)
+
+    # Produce random text
+    random_text = make_text(chains, choice(seed_words))
+
+    return random_text
+
+
+
+
+client = discord.Client()
+
+
+@client.event
+async def on_ready():
+    print(f'Successfully connected! Logged in as {client.user}.')
+
+
+@client.event
+async def on_message(message):
+    if message.author == client.user:
+        return
+
+    a_presidential_message = text_blender(['biden_on_covid19.txt', 'clinton_impeachment.txt', 'reagan_sold_weapons.txt', 'nixon_resignation.txt'])
+    await message.channel.send(a_presidential_message[:1000])
+
+client.run(os.environ['DISCORD_TOKEN'])
